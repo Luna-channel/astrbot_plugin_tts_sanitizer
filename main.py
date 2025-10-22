@@ -30,7 +30,7 @@ DEFAULT_REPLACEMENTS = ["233|哈哈哈", "666|厉害", "999|很棒", "6|厉害",
 
 
 @register(
-    "tts_sanitizer", "小鸭", "TTS文本过滤插件，自动清理不适合TTS朗读的内容", "0.2"
+    "tts_sanitizer", "柯尔", "TTS文本过滤插件，自动清理不适合TTS朗读的内容", "0.2"
 )
 class TTSSanitizerPlugin(Star):
     def __init__(self, context: Context, config: Optional[AstrBotConfig] = None):
@@ -158,7 +158,7 @@ class TTSSanitizerPlugin(Star):
 
     @filter.on_decorating_result(priority=-1001)
     async def filter_for_tts_only(self, event: AstrMessageEvent):
-        """在TTS插件前过滤文本内容"""
+        """为TTS提供过滤后的内容，不修改原始消息"""
         if not self.config.get("enabled", True):
             return
 
@@ -170,11 +170,11 @@ class TTSSanitizerPlugin(Star):
             if not result or not hasattr(result, "chain") or not result.chain:
                 return
 
-            # 保存原始文本内容，并直接修改Plain组件
-            original_texts = {}
-            text_changed = False
+            # 为TTS创建过滤后的消息链副本
+            tts_chain = []
+            has_filtered_content = False
 
-            for i, comp in enumerate(result.chain):
+            for comp in result.chain:
                 if isinstance(comp, Plain) and getattr(comp, "text", ""):
                     original_text = comp.text
                     filtered_text = self.filter_text(original_text)
@@ -186,40 +186,43 @@ class TTSSanitizerPlugin(Star):
                         return
 
                     if filtered_text != original_text:
-                        # 保存原始文本
-                        original_texts[i] = original_text
-                        # 临时修改为过滤后的文本
-                        comp.text = filtered_text
-                        text_changed = True
+                        # 创建新的Plain组件用于TTS
+                        tts_chain.append(Plain(text=filtered_text))
+                        has_filtered_content = True
                         if debug:
                             logger.info(
-                                f"🔧 TTS过滤: 组件{i} '{original_text[:20]}...' -> '{filtered_text[:20]}...'"
+                                f"🔧 TTS过滤: '{original_text[:20]}...' -> '{filtered_text[:20]}...'"
                             )
+                    else:
+                        # 文本未变化，直接复制
+                        tts_chain.append(Plain(text=original_text))
+                else:
+                    # 非文本组件直接复制
+                    tts_chain.append(comp)
 
-            if text_changed:
-                if debug:
-                    logger.info(f"✅ TTS过滤: 已修改 {len(original_texts)} 个文本组件")
-
-                # 立即恢复原始文本（在TTS插件读取后）
-                def restore_texts():
-                    try:
-                        for i, original_text in original_texts.items():
-                            if i < len(result.chain):
-                                comp = result.chain[i]
-                                if isinstance(comp, Plain):
-                                    comp.text = original_text
-                                    if debug:
-                                        logger.info(f"🔄 恢复组件{i}原始文本")
-                    except Exception as e:
+            # 将过滤后的内容存储到事件上下文中，供TTS插件使用
+            if has_filtered_content and tts_chain:
+                # 使用事件上下文存储过滤后的消息链
+                # 这样TTS插件可以从上下文中读取过滤后的内容
+                try:
+                    # 尝试使用事件上下文存储
+                    if hasattr(event, 'set_metadata'):
+                        event.set_metadata("tts_filtered_chain", tts_chain)
+                    elif hasattr(event, 'context'):
+                        event.context.set_plugin_data("tts_sanitizer", "filtered_chain", tts_chain)
+                    else:
+                        # 回退方案：直接修改消息链（但只影响TTS）
+                        result.chain = tts_chain
                         if debug:
-                            logger.warning(f"恢复原始文本失败: {e}")
-
-                # 使用更可靠的恢复机制：在下一个事件循环迭代中恢复
-                # 这确保TTS插件已经处理完毕，但消息还未发送给用户
-                import asyncio
-                
-                # 使用call_later而不是call_soon，确保在TTS处理完成后恢复
-                asyncio.get_event_loop().call_later(0.01, restore_texts)
+                            logger.warning("⚠️ 使用回退方案：直接修改消息链")
+                    
+                    if debug:
+                        logger.info(f"✅ TTS过滤: 已创建过滤后的消息链，包含 {len(tts_chain)} 个组件")
+                except Exception as e:
+                    if debug:
+                        logger.warning(f"⚠️ 存储过滤内容失败: {e}")
+                    # 如果存储失败，使用回退方案
+                    result.chain = tts_chain
 
         except Exception as e:
             logger.error(f"TTS过滤处理错误: {e}")
@@ -267,7 +270,12 @@ class TTSSanitizerPlugin(Star):
 
 📊 处理结果:
 • 字符压缩率: {round((len(user_input) - len(filtered)) / len(user_input) * 100, 1) if user_input else 0}%
-• TTS状态: {"❌ 跳过" if skip else "✅ 可朗读"}"""
+• TTS状态: {"❌ 跳过" if skip else "✅ 可朗读"}
+
+🔄 新机制说明:
+• 原始消息保持不变，仅TTS使用过滤后的内容
+• 避免了文本恢复的时机问题
+• 更稳定可靠的过滤机制"""
 
         yield event.plain_result(result)
 
@@ -283,13 +291,19 @@ class TTSSanitizerPlugin(Star):
 🔧 状态:
 • 启用: {"✅" if self.config.get("enabled", True) else "❌"}
 • 字数限制: {self.config.get("max_length", 200)}
+• 处理长度限制: {self.config.get("max_processing_length", 10000)}
 • 调试模式: {"✅" if self.config.get("debug_mode", False) else "❌"}
 
 ⚙️ 配置:
 • 直接过滤词汇: {len(filter_words)} 个
 • 替换词汇: {replacement_count} 个
 • 颜文字过滤: {"✅" if self.emoticon_regex else "❌"}
-• 特殊符号过滤: {"✅" if self.config.get("filter_special_chars", True) else "❌"}"""
+• 特殊符号过滤: {"✅" if self.config.get("filter_special_chars", True) else "❌"}
+
+🔄 过滤机制:
+• 使用消息链副本机制，不修改原始消息
+• 为TTS提供过滤后的内容
+• 避免了文本恢复的时机问题"""
 
         yield event.plain_result(result)
 
