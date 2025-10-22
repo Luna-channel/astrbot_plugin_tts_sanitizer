@@ -10,6 +10,12 @@
     "default": 200,
     "hint": "范围：0-1000"
   },
+  "max_processing_length": {
+    "description": "最大处理文本长度（超过此长度将跳过过滤，防止处理超长文本）",
+    "type": "int",
+    "default": 10000,
+    "hint": "范围：1000-50000"
+  },
   "emoticon_patterns": {
     "description": "颜文字过滤规则（正则表达式列表）",
     "type": "list",

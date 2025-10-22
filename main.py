@@ -3,6 +3,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.api.provider import LLMResponse
 from astrbot.core.config.astrbot_config import AstrBotConfig
+from astrbot.api.message_components import Plain
 import re
 import time
 from typing import Optional, Dict, Any
@@ -49,6 +50,7 @@ class TTSSanitizerPlugin(Star):
         return {
             "enabled": True,
             "max_length": 200,
+            "max_processing_length": 10000,
             "emoticon_patterns": EMOTICON_PATTERNS,
             "filter_words": FILTER_WORDS,
             "replacement_words": DEFAULT_REPLACEMENTS,
@@ -120,7 +122,8 @@ class TTSSanitizerPlugin(Star):
 
     def filter_text(self, text: str) -> str:
         """过滤文本"""
-        if not text or len(text) > 10000:  # 防护
+        max_processing_length = self.config.get("max_processing_length", 10000)
+        if not text or len(text) > max_processing_length:  # 防护
             return ""
 
         # 1. 过滤颜文字
@@ -167,8 +170,6 @@ class TTSSanitizerPlugin(Star):
             if not result or not hasattr(result, "chain") or not result.chain:
                 return
 
-            from astrbot.api.message_components import Plain
-
             # 保存原始文本内容，并直接修改Plain组件
             original_texts = {}
             text_changed = False
@@ -213,10 +214,12 @@ class TTSSanitizerPlugin(Star):
                         if debug:
                             logger.warning(f"恢复原始文本失败: {e}")
 
-                # 通过事件延迟恢复（让TTS先处理）
+                # 使用更可靠的恢复机制：在下一个事件循环迭代中恢复
+                # 这确保TTS插件已经处理完毕，但消息还未发送给用户
                 import asyncio
-
-                asyncio.get_event_loop().call_soon(restore_texts)
+                
+                # 使用call_later而不是call_soon，确保在TTS处理完成后恢复
+                asyncio.get_event_loop().call_later(0.01, restore_texts)
 
         except Exception as e:
             logger.error(f"TTS过滤处理错误: {e}")
