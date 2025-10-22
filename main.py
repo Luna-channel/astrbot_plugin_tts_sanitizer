@@ -158,7 +158,7 @@ class TTSSanitizerPlugin(Star):
 
     @filter.on_decorating_result(priority=-1001)
     async def filter_for_tts_only(self, event: AstrMessageEvent):
-        """为TTS提供过滤后的内容，不修改原始消息"""
+        """在TTS插件前过滤文本内容，使用更可靠的恢复机制"""
         if not self.config.get("enabled", True):
             return
 
@@ -170,11 +170,11 @@ class TTSSanitizerPlugin(Star):
             if not result or not hasattr(result, "chain") or not result.chain:
                 return
 
-            # 为TTS创建过滤后的消息链副本
-            tts_chain = []
-            has_filtered_content = False
+            # 保存原始文本内容，并直接修改Plain组件
+            original_texts = {}
+            text_changed = False
 
-            for comp in result.chain:
+            for i, comp in enumerate(result.chain):
                 if isinstance(comp, Plain) and getattr(comp, "text", ""):
                     original_text = comp.text
                     filtered_text = self.filter_text(original_text)
@@ -186,43 +186,44 @@ class TTSSanitizerPlugin(Star):
                         return
 
                     if filtered_text != original_text:
-                        # 创建新的Plain组件用于TTS
-                        tts_chain.append(Plain(text=filtered_text))
-                        has_filtered_content = True
+                        # 保存原始文本
+                        original_texts[i] = original_text
+                        # 临时修改为过滤后的文本
+                        comp.text = filtered_text
+                        text_changed = True
                         if debug:
                             logger.info(
-                                f"🔧 TTS过滤: '{original_text[:20]}...' -> '{filtered_text[:20]}...'"
+                                f"🔧 TTS过滤: 组件{i} '{original_text[:20]}...' -> '{filtered_text[:20]}...'"
                             )
-                    else:
-                        # 文本未变化，直接复制
-                        tts_chain.append(Plain(text=original_text))
-                else:
-                    # 非文本组件直接复制
-                    tts_chain.append(comp)
 
-            # 将过滤后的内容存储到事件上下文中，供TTS插件使用
-            if has_filtered_content and tts_chain:
-                # 使用事件上下文存储过滤后的消息链
-                # 这样TTS插件可以从上下文中读取过滤后的内容
-                try:
-                    # 尝试使用事件上下文存储
-                    if hasattr(event, 'set_metadata'):
-                        event.set_metadata("tts_filtered_chain", tts_chain)
-                    elif hasattr(event, 'context'):
-                        event.context.set_plugin_data("tts_sanitizer", "filtered_chain", tts_chain)
-                    else:
-                        # 回退方案：直接修改消息链（但只影响TTS）
-                        result.chain = tts_chain
+            if text_changed:
+                if debug:
+                    logger.info(f"✅ TTS过滤: 已修改 {len(original_texts)} 个文本组件")
+
+                # 使用更可靠的恢复机制
+                def restore_texts():
+                    try:
+                        for i, original_text in original_texts.items():
+                            if i < len(result.chain):
+                                comp = result.chain[i]
+                                if isinstance(comp, Plain):
+                                    comp.text = original_text
+                                    if debug:
+                                        logger.info(f"🔄 恢复组件{i}原始文本")
+                    except Exception as e:
                         if debug:
-                            logger.warning("⚠️ 使用回退方案：直接修改消息链")
-                    
-                    if debug:
-                        logger.info(f"✅ TTS过滤: 已创建过滤后的消息链，包含 {len(tts_chain)} 个组件")
-                except Exception as e:
-                    if debug:
-                        logger.warning(f"⚠️ 存储过滤内容失败: {e}")
-                    # 如果存储失败，使用回退方案
-                    result.chain = tts_chain
+                            logger.warning(f"恢复原始文本失败: {e}")
+
+                # 使用asyncio.create_task在下一个事件循环中恢复
+                import asyncio
+                
+                async def delayed_restore():
+                    # 等待一个很短的时间，确保TTS插件已经处理完毕
+                    await asyncio.sleep(0.05)
+                    restore_texts()
+                
+                # 创建异步任务来恢复文本
+                asyncio.create_task(delayed_restore())
 
         except Exception as e:
             logger.error(f"TTS过滤处理错误: {e}")
