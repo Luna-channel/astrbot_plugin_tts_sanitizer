@@ -30,7 +30,7 @@ DEFAULT_REPLACEMENTS = ["233|哈哈哈", "666|厉害", "999|很棒", "6|厉害",
 
 
 @register(
-    "tts_sanitizer", "柯尔", "TTS文本过滤插件，自动清理不适合TTS朗读的内容", "0.2"
+    "tts_sanitizer", "柯尔", "TTS文本过滤插件，自动清理不适合TTS朗读的内容", "0.3"
 )
 class TTSSanitizerPlugin(Star):
     def __init__(self, context: Context, config: Optional[AstrBotConfig] = None):
