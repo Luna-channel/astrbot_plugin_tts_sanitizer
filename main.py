@@ -158,37 +158,49 @@ class TTSSanitizerPlugin(Star):
 
     @filter.on_decorating_result(priority=-1001)
     async def filter_for_tts_only(self, event: AstrMessageEvent):
-        """为TTS过滤文本内容"""
+        """在TTS插件前过滤文本内容"""
         if not self.config.get("enabled", True):
             return
 
         result = event.get_result()
-        if not result or not result.chain:
+        if not result or not hasattr(result, "chain") or not result.chain:
             return
 
-        # 保存原始文本，临时修改为过滤后的文本
+        # 保存原始文本内容，并直接修改Plain组件
         original_texts = {}
+        text_changed = False
+
         for i, comp in enumerate(result.chain):
-            if isinstance(comp, Plain) and comp.text:
+            if isinstance(comp, Plain) and getattr(comp, "text", ""):
                 original_text = comp.text
                 filtered_text = self.filter_text(original_text)
-                
+
+                # 检查是否应该跳过TTS
                 if self.should_skip_tts(filtered_text):
                     return
-                
-                if filtered_text != original_text:
-                    original_texts[i] = original_text
-                    comp.text = filtered_text
 
-        # 延迟恢复原始文本
-        if original_texts:
+                if filtered_text != original_text:
+                    # 保存原始文本
+                    original_texts[i] = original_text
+                    # 临时修改为过滤后的文本
+                    comp.text = filtered_text
+                    text_changed = True
+
+        # 如果有文本被修改，延迟恢复原始文本
+        if text_changed:
+            def restore_texts():
+                try:
+                    for i, original_text in original_texts.items():
+                        if i < len(result.chain):
+                            comp = result.chain[i]
+                            if isinstance(comp, Plain):
+                                comp.text = original_text
+                except Exception as e:
+                    logger.warning(f"恢复原始文本失败: {e}")
+
+            # 使用call_later延迟恢复
             import asyncio
-            async def restore():
-                await asyncio.sleep(0.1)
-                for i, text in original_texts.items():
-                    if i < len(result.chain):
-                        result.chain[i].text = text
-            asyncio.create_task(restore())
+            asyncio.get_event_loop().call_later(0.1, restore_texts)
 
     @filter.command("tts_filter_test")
     async def test_filter(self, event: AstrMessageEvent):
@@ -230,12 +242,7 @@ class TTSSanitizerPlugin(Star):
 
 📊 处理结果:
 • 字符压缩率: {round((len(user_input) - len(filtered)) / len(user_input) * 100, 1) if user_input else 0}%
-• TTS状态: {"❌ 跳过" if skip else "✅ 可朗读"}
-
-🔄 新机制说明:
-• 原始消息保持不变，仅TTS使用过滤后的内容
-• 避免了文本恢复的时机问题
-• 更稳定可靠的过滤机制"""
+• TTS状态: {"❌ 跳过" if skip else "✅ 可朗读"}"""
 
         yield event.plain_result(result)
 
