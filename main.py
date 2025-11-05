@@ -31,7 +31,7 @@ DEFAULT_REPLACEMENTS = ["233|哈哈哈", "666|厉害", "999|很棒", "6|厉害",
 
 
 @register(
-    "tts_sanitizer", "小鸭", "TTS文本过滤插件，自动清理不适合TTS朗读的内容", "0.2"
+    "tts_sanitizer", "柯尔", "TTS文本过滤插件，自动清理不适合TTS朗读的内容", "0.3"
 )
 class TTSSanitizerPlugin(Star):
     def __init__(self, context: Context, config: Optional[AstrBotConfig] = None):
@@ -51,6 +51,7 @@ class TTSSanitizerPlugin(Star):
         return {
             "enabled": True,
             "max_length": 200,
+            "max_processing_length": 10000,
             "emoticon_patterns": EMOTICON_PATTERNS,
             "filter_words": FILTER_WORDS,
             "replacement_words": DEFAULT_REPLACEMENTS,
@@ -122,7 +123,8 @@ class TTSSanitizerPlugin(Star):
 
     def filter_text(self, text: str) -> str:
         """过滤文本"""
-        if not text or len(text) > 10000:  # 防护
+        max_processing_length = self.config.get("max_processing_length", 10000)
+        if not text or len(text) > max_processing_length:
             return ""
 
         # 1. 过滤颜文字
