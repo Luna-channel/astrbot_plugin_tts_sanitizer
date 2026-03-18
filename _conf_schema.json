@@ -5,19 +5,19 @@
     "default": true
   },
   "max_length": {
-    "description": "最大朗读字数（超过此字数将跳过TTS，0表示无限制）",
+    "description": "最大朗读字数（超过此字数跳过朗读，防止token浪费，0表示无限制）",
     "type": "int",
     "default": 200,
     "hint": "范围：0-1000"
   },
   "max_processing_length": {
-    "description": "最大处理文本长度（超过此长度将跳过过滤，防止处理超长文本）",
+    "description": "最大处理文本长度（超过此长度跳过过滤，防止正则处理超长文本卡顿）",
     "type": "int",
     "default": 10000,
     "hint": "范围：1000-50000"
   },
-  "emoticon_patterns": {
-    "description": "颜文字过滤规则（正则表达式列表）",
+  "remove_patterns": {
+    "description": "正则过滤规则（匹配到的内容会被删除，一行一个正则表达式）",
     "type": "list",
     "items": { "type": "string" },
     "default": [
@@ -27,20 +27,25 @@
       "[oO][＿_][oO]",
       "[xX][＿_][xX]",
       "[－-][＿_][－-]",
-      "[（(][；;][＿_][；;][）)]"
+      "[★☆♪♫♬♩♡♥❤️💖💕💗💓💝💟💜💛💚💙🧡🤍🖤🤎💔❣️💋]",
+      "[→←↑↓↖↗↘↙↔↕↺↻]"
     ]
   },
   "filter_words": {
-    "description": "直接过滤的词汇（完全不朗读）",
+    "description": "直接过滤的字符和词汇（会被TTS朗读出怪声的符号、颜文字用字、网络用语等）",
     "type": "list",
     "items": { "type": "string" },
     "default": [
-      "orz",
-      "OTZ", 
-      "QAQ",
-      "QWQ",
-      "TAT",
-      "TUT"
+      "ω", "Ω",
+      "σ", "Σ",
+      "ε",
+      "д", "Д",
+      "´", "`",
+      "＝",
+      "∀", "∇",
+      "orz", "OTZ",
+      "QAQ", "QWQ", "TAT", "TUT",
+      "www"
     ]
   },
   "replacement_words": {
@@ -51,37 +56,17 @@
       "233|哈哈哈",
       "666|厉害",
       "999|很棒",
-      "6|厉害",
       "555|呜呜呜"
     ]
   },
-  "filter_special_chars": {
-    "description": "是否过滤特殊符号和表情",
-    "type": "bool",
-    "default": true
-  },
-  "special_char_patterns": {
-    "description": "特殊符号过滤规则（正则表达式列表）",
-    "type": "list",
-    "items": { "type": "string" },
-    "default": [
-      "[★☆♪♫♬♩♡♥❤️💖💕💗💓💝💟💜💛💚💙🧡🤍🖤🤎💔❣️💋]",
-      "[→←↑↓↖↗↘↙↔↕↺↻]"
-    ]
-  },
-  "filter_repeats": {
-    "description": "是否过滤重复字符（如：哈哈哈哈 -> 哈哈）",
-    "type": "bool",
-    "default": true
-  },
   "max_repeat_count": {
-    "description": "保留的最大重复字符数量",
+    "description": "重复字符压缩：保留的最大重复数量（如设为2，哈哈哈哈→哈哈），设为0关闭此功能",
     "type": "int",
     "default": 2,
-    "hint": "范围：1-5"
+    "hint": "范围：0-5，0=关闭"
   },
   "debug_mode": {
-    "description": "是否启用调试模式，显示详细的过滤过程",
+    "description": "是否启用调试模式，在日志中显示每次过滤的详细对比",
     "type": "bool",
     "default": false
   }
