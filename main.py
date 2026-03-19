@@ -28,7 +28,7 @@ DEFAULT_REPLACEMENTS = ["233|哈哈哈", "666|厉害", "999|很棒", "555|呜呜
 
 
 @register(
-    "tts_sanitizer", "柯尔", "TTS文本过滤插件 - 透明包装TTS Provider，不修改消息链", "1.0"
+    "tts_sanitizer", "柯尔", "TTS文本过滤插件 - 透明包装TTS Provider，不修改消息链", "1.0.1"
 )
 class TTSSanitizerPlugin(Star):
     def __init__(self, context: Context, config: Optional[AstrBotConfig] = None):
@@ -59,7 +59,7 @@ class TTSSanitizerPlugin(Star):
     async def initialize(self):
         """异步插件初始化方法"""
         logger.info(
-            f"TTS文本过滤插件 v1.0 已启动 - 最大字数: {self.config.get('max_length', 200)}"
+            f"TTS文本过滤插件 v1.0.1 已启动 - 最大字数: {self.config.get('max_length', 200)}"
         )
         logger.info(
             f"当前配置: 启用={self.config.get('enabled', True)}, 调试模式={self.config.get('debug_mode', False)}"
@@ -75,18 +75,36 @@ class TTSSanitizerPlugin(Star):
     @filter.on_astrbot_loaded()
     async def on_astrbot_loaded(self):
         """AstrBot 加载完成后，包装所有 TTS Provider 的 get_audio 方法"""
+        logger.info("TTS过滤: on_astrbot_loaded 钩子被触发")
         self._wrap_all_providers()
+        self._register_provider_change_hook()
+
+    def _register_provider_change_hook(self):
+        """注册 Provider 变更钩子，当 Provider 重载时自动重新包装"""
+        try:
+            from astrbot.core.provider.entities import ProviderType
+            pm = self.context.provider_manager
+            def _on_provider_change(provider_id: str, provider_type, umo):
+                if provider_type == ProviderType.TEXT_TO_SPEECH:
+                    logger.info(f"TTS过滤: 检测到 TTS Provider 变更({provider_id})，重新包装...")
+                    self._wrap_all_providers()
+            pm.register_provider_change_hook(_on_provider_change)
+            logger.info("TTS过滤: 已注册 Provider 变更钩子")
+        except Exception as e:
+            logger.warning(f"TTS过滤: 注册 Provider 变更钩子失败: {e}")
 
     def _wrap_all_providers(self):
         """包装所有 TTS Provider"""
+        logger.info("TTS过滤: 开始包装 TTS Provider...")
         try:
             providers = self.context.get_all_tts_providers()
+            logger.info(f"TTS过滤: 获取到 {len(providers) if providers else 0} 个 TTS Provider")
         except Exception as e:
             logger.warning(f"TTS过滤: 获取 TTS Provider 失败: {e}")
             return
 
         if not providers:
-            logger.info("TTS过滤: 未发现 TTS Provider，等待后续加载")
+            logger.warning("TTS过滤: 未发现 TTS Provider，包装将不会生效！")
             return
 
         wrapped_count = 0
@@ -108,22 +126,24 @@ class TTSSanitizerPlugin(Star):
         plugin = self
 
         async def wrapped_get_audio(text: str) -> str:
+            debug_mode = plugin.config.get('debug_mode', False)
+            if debug_mode:
+                logger.debug(f"TTS过滤: 包装函数被调用，原文: {text[:50]}...")
+            
             if not plugin.config.get('enabled', True) or not text:
                 return await original_get_audio(text)
 
             # 超过最大朗读字数则跳过（返回空，TTS Provider 自行处理）
             max_len = plugin.config.get('max_length', 200)
             if max_len > 0 and len(text) > max_len:
-                if plugin.config.get('debug_mode', False):
+                if debug_mode:
                     logger.info(f"🚫 TTS过滤: 文本 {len(text)} 字超过限制 {max_len}，跳过朗读")
                 return await original_get_audio("")
 
             filtered = plugin.filter_text(text)
 
-            if plugin.config.get('debug_mode', False) and filtered != text:
-                logger.info(
-                    f"🔧 TTS过滤: '{text[:50]}' → '{filtered[:50]}'"
-                )
+            if filtered != text:
+                logger.info(f"🔧 TTS过滤: '{text[:30]}...' → '{filtered[:30]}...'")
 
             if not filtered.strip():
                 return await original_get_audio("")
@@ -272,7 +292,17 @@ class TTSSanitizerPlugin(Star):
             count = self.config.get("max_repeat_count", 2)
             text = self.repeat_regex.sub(lambda m: m.group(1) * count, text)
 
-        # 5. 清理多余空格
+        # 5. 清理空引号对（过滤内容后残留的 ""、''、「」、""、'' 等）
+        text = re.sub(r'["""\u201c\u201d]\s*["""\u201c\u201d]', '', text)
+        text = re.sub(r"['''\u2018\u2019]\s*['''\u2018\u2019]", '', text)
+        text = re.sub(r'[「」『』【】\[\]]\s*[「」『』【】\[\]]', '', text)
+
+        # 6. 清理残留标点（连续逗号/顿号、开头结尾的标点等）
+        text = re.sub(r'[,，、;；]\s*(?=[,，、;；\s])', '', text)
+        text = re.sub(r'[,，、;；]\s*$', '', text)
+        text = re.sub(r'^\s*[,，、;；]\s*', '', text)
+
+        # 7. 清理多余空格
         return re.sub(r"\s+", " ", text).strip()
 
     def should_skip_tts(self, text: str) -> bool:
@@ -336,7 +366,7 @@ class TTSSanitizerPlugin(Star):
         wrapped_count = len(self._wrapped_providers)
         repeat_count = self.config.get("max_repeat_count", 2)
 
-        result = f"""📊 TTS过滤插件状态 v1.0
+        result = f"""📊 TTS过滤插件状态 v1.0.1
 
 🔧 状态:
 • 启用: {"✅" if self.config.get("enabled", True) else "❌"}
